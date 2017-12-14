@@ -1,6 +1,5 @@
 #coding:utf-8
 import urllib2,re,itertools,time
-from bs4 import BeautifulSoup
 
 """
 下载url信息
@@ -59,7 +58,7 @@ def crawl_ID(url,max_errors=5):
         print "Error",e.message
 
 
-import urlparse,robotparser
+import urlparse,robotparser,time
 
 """
 用来统计csnd论坛使用者信息
@@ -70,36 +69,48 @@ def csdn_user_count(baseurl,childurl,max_depth=2):
     rp.set_url('http://bbs.csdn.net/robots.txt')
     rp.read()
     user_agent = 'MMozilla/5.0 (Windows NT 6.1; WOW64; rv:31.0) Gecko/20100101 Firefox/31.0'
+    depth=0
+    MAX_NUM=20
     try:
         for page in itertools.count(1):
-            time.sleep(1)
             #构建根url
             new_url=urlparse.urljoin(baseurl,childurl)+'?page=%d'%page
-            depth=seen[new_url]
+            print "new_url=",new_url
+            if new_url in seen:
+                depth=seen[new_url]
             if depth==max_depth:
                 return
             #获取根url下载页面中所有的连接，如果获取不到说明已经到了尾页，直接退出
-            links=get_Links(new_url);
-            if(links is None):
-                break;
-            else:
+            for name,scraper in [('Regular',get_links),('BeautifulSoup',get_links2),('Lxml',get_links3)]:
+                start=time.time()
+                for i in range(1,MAX_NUM):
+                    if scraper==get_links:
+                        re.purge()
+                    links=scraper(new_url);
+                    #print 'len(links)=',len(links)
+                    if(links is None):
+                        break
+                    else:
+                        continue
                 #遍历所有的连接获取用户信息
-                for link in links:
-                    if link not in seen:
-                        can=rp.can_fetch(user_agent,link)
-                        if can==True:
-                            print "Get User info :",link
-                            throttle=Throttle(5)
-                            throttle.wait(link)
-                            get_userinfo(link)
-                            seen[link]=depth+1
+                    for link in links:
+                        if link not in seen:
+                            can=rp.can_fetch(user_agent,link)
+                            if can==True:
+                                print "Get User info :",link
+                                throttle=Throttle(5)
+                                throttle.wait(link)
+                                get_userinfo(link)
+                                seen[link]=depth+1
+                end=time.time()
+                print '%s: %.2f seconds'%(name,end-start)
     except Exception as e:
         print 'csdn_user_count error:',e.message
 
 """
-获取论坛每一页的发帖者链接
+使用正则表达式获取论坛每一页的发帖者链接
 """
-def get_Links(url):
+def get_links(url):
     links=[]
     user_info=re.compile('<a href="(.*?)" rel="nofollow"',re.IGNORECASE)
     try:
@@ -111,6 +122,41 @@ def get_Links(url):
     except Exception as e:
         print 'get_Links error:',e.message
     return links
+
+from bs4 import BeautifulSoup
+"""
+使用BeautfifulSoup获取每一页发帖者的连接
+"""
+def get_links2(url):
+    links=[]
+    try:
+        html=download(url)
+        if html is None:
+            return None
+        else:
+            soup=BeautifulSoup(html,'html.parser')
+            links=soup.find_all('a',attrs={'rel':'nofollow'})
+    except Exception as e:
+        print "get_links2 error",e.message
+    return links
+
+import lxml.html
+"""
+使用lxml获取每一页发帖者的连接
+"""
+def get_links3(url):
+    links=[]
+    try:
+        html=download(url)
+        if html is None:
+            return None
+        else:
+            tree=lxml.html.fromstring(html)
+            links=tree.cssselect('td.tc > a[rel=nofollow]')
+    except Exception as e:
+        print "get_links2 error",e.message
+    return links
+
 
 """
 获取使用者信息
